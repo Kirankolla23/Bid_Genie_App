@@ -121,8 +121,7 @@ def optimize_bid_with_stacking(input_df_raw, base_models, meta_model, scaler):
     possible_markups = np.arange(0.01, 0.20, 0.005) 
     results = []
     
-    # --- IDENTIFY TARGET COLUMNS (The "Shotgun" Logic) ---
-    # We find ALL columns in the model that look like 'Markup' or 'Bid'
+    # --- IDENTIFY TARGET COLUMNS ---
     target_markup_cols = [c for c in expected_cols if 'markup' in c.lower() or 'pct' in c.lower()]
     target_bid_cols = [c for c in expected_cols if 'bid' in c.lower() and 'price' in c.lower()]
     target_cost_cols = [c for c in expected_cols if 'cost' in c.lower()]
@@ -131,25 +130,31 @@ def optimize_bid_with_stacking(input_df_raw, base_models, meta_model, scaler):
         current_bid = cost * (1 + markup)
         input_data = base_input_df.copy()
         
-        # --- UPDATE EVERYTHING THAT LOOKS LIKE A TARGET ---
-        # 1. Update Markup Columns (e.g., actual_markup_pct, My_Markup)
-        for col in target_markup_cols:
-            input_data[col] = markup  # Update all of them!
+        # --- THE FIX: INTELLIGENT SCALING UPDATES ---
         
-        # 2. Update Bid Price Columns (e.g., My_Bid_Price_Crores)
+        # 1. Update Markup Columns (Handle Decimals vs Percent)
+        for col in target_markup_cols:
+            if 'pct' in col.lower() or 'percent' in col.lower():
+                 input_data[col] = markup * 100.0  # Send 19.5
+            else:
+                 input_data[col] = markup          # Send 0.195
+        
+        # 2. Update Bid Price Columns
         for col in target_bid_cols:
             input_data[col] = current_bid
             
-        # 3. Update Cost Columns (Keep them synced)
+        # 3. Update Cost Columns
         for col in target_cost_cols:
             input_data[col] = cost
         
-        # Fallback Hard Updates (Just in case)
+        # Fallback Hard Updates (Explicit Logic)
         input_data['My_Markup'] = markup
         input_data['My_Bid_Price_Crores'] = current_bid
         input_data['total_cost_estimate_crores'] = cost
-        if 'actual_markup_pct' in input_data.columns: input_data['actual_markup_pct'] = markup
-        if 'Markup_Percent' in input_data.columns: input_data['Markup_Percent'] = markup
+        
+        # Extra safety for known variations
+        if 'actual_markup_pct' in input_data.columns: input_data['actual_markup_pct'] = markup * 100.0
+        if 'Markup_Percent' in input_data.columns: input_data['Markup_Percent'] = markup * 100.0
 
         input_data = input_data[expected_cols]
         input_data_scaled = scaler.transform(input_data)
