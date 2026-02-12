@@ -22,7 +22,6 @@ REGION_OPTIONS = [1.0, 1.2, 1.5]
 # ==========================================
 @st.cache_resource
 def load_models():
-    # Load the FRESH files you just uploaded
     try:
         scaler_cls = joblib.load('final_scaler.pkl')
         base_cls = joblib.load('final_base_models_dict.pkl')
@@ -116,23 +115,40 @@ def optimize_bid_with_stacking(input_df_raw, base_models, meta_model, scaler):
     elif 'Estimated_Cost' in input_df_raw.columns:
         cost = input_df_raw['Estimated_Cost'].values[0]
 
-    # 2. Fill Missing Columns using "Smart Fill"
+    # 2. Fill Missing Columns
     base_input_df, expected_cols = smart_fill_missing_features(input_df_raw.copy(), scaler)
     
     possible_markups = np.arange(0.01, 0.20, 0.005) 
     results = []
     
+    # --- IDENTIFY TARGET COLUMNS (The "Shotgun" Logic) ---
+    # We find ALL columns in the model that look like 'Markup' or 'Bid'
+    target_markup_cols = [c for c in expected_cols if 'markup' in c.lower() or 'pct' in c.lower()]
+    target_bid_cols = [c for c in expected_cols if 'bid' in c.lower() and 'price' in c.lower()]
+    target_cost_cols = [c for c in expected_cols if 'cost' in c.lower()]
+
     for markup in possible_markups:
         current_bid = cost * (1 + markup)
         input_data = base_input_df.copy()
         
-        # --- THE FIX: Direct Update of Your Columns ---
-        input_data['My_Bid_Price_Crores'] = current_bid
-        input_data['My_Markup'] = markup
-        input_data['total_cost_estimate_crores'] = cost
+        # --- UPDATE EVERYTHING THAT LOOKS LIKE A TARGET ---
+        # 1. Update Markup Columns (e.g., actual_markup_pct, My_Markup)
+        for col in target_markup_cols:
+            input_data[col] = markup  # Update all of them!
         
-        # Fallback for slight variations
-        if 'Bid_Price' in input_data.columns: input_data['Bid_Price'] = current_bid
+        # 2. Update Bid Price Columns (e.g., My_Bid_Price_Crores)
+        for col in target_bid_cols:
+            input_data[col] = current_bid
+            
+        # 3. Update Cost Columns (Keep them synced)
+        for col in target_cost_cols:
+            input_data[col] = cost
+        
+        # Fallback Hard Updates (Just in case)
+        input_data['My_Markup'] = markup
+        input_data['My_Bid_Price_Crores'] = current_bid
+        input_data['total_cost_estimate_crores'] = cost
+        if 'actual_markup_pct' in input_data.columns: input_data['actual_markup_pct'] = markup
         if 'Markup_Percent' in input_data.columns: input_data['Markup_Percent'] = markup
 
         input_data = input_data[expected_cols]
