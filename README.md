@@ -21,3 +21,6 @@ To explore the optimization and explainability features of this project, follow 
       c. Generate a SHAP Waterfall Plot to explain which features contributed most to the win probability.
 
 5. Download Report: Once the analysis is complete, you can download a full CSV report of the strategy simulation.
+
+Do you know ?
+In bidding auctions, the "winner" is often the person who most underestimated the costs. Therefore, winning can actually mean losing money.
