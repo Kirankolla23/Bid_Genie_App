@@ -160,6 +160,9 @@ def optimize_bid_with_stacking(input_df_raw, base_models, meta_model, scaler):
     possible_markups = np.arange(0.01, 0.20, 0.005) 
     results = []
     
+    # --- THE FIX: Seed must be OUTSIDE the loop to match Notebook ---
+    np.random.seed(42) 
+    
     for markup in possible_markups:
         current_bid = cost * (1 + markup)
         input_data = base_input_df.copy()
@@ -192,8 +195,7 @@ def optimize_bid_with_stacking(input_df_raw, base_models, meta_model, scaler):
 
         win_prob = meta_model.predict_proba(meta_features)[:, 1][0] 			
         
-        # --- ADDED: RANDOM SEED & 95% CONFIDENCE INTERVAL LOGIC ---
-        np.random.seed(42) 
+        # --- Randomness Logic (Now synced with Notebook) ---
         simulated_costs = np.random.normal(loc=cost, scale=cost * 0.05, size=1000)
         simulated_profits_if_won = current_bid - simulated_costs
         risk_prob = np.mean(simulated_profits_if_won < 0)
@@ -202,6 +204,10 @@ def optimize_bid_with_stacking(input_df_raw, base_models, meta_model, scaler):
         lower_bound_sim = np.percentile(simulated_profits_if_won, 2.5) * win_prob
         upper_bound_sim = np.percentile(simulated_profits_if_won, 97.5) * win_prob
         
+        # --- CVaR Calculation ---
+        var_95 = np.percentile(simulated_profits_if_won, 5)
+        cvar_95 = simulated_profits_if_won[simulated_profits_if_won <= var_95].mean()
+        
         results.append({
             'Markup_Percent': markup * 100,
             'Bid_Price': current_bid,
@@ -209,7 +215,8 @@ def optimize_bid_with_stacking(input_df_raw, base_models, meta_model, scaler):
             'Expected_Profit': (current_bid - cost) * win_prob,
             'Risk_of_Loss_Prob': risk_prob * 100,
             'Lower_Bound': lower_bound_sim,   
-            'Upper_Bound': upper_bound_sim,   
+            'Upper_Bound': upper_bound_sim, 
+            'CVaR_95': cvar_95, 
             'Scaled_Features': input_data_scaled,
             'Raw_Display_Features': input_data[expected_cols],
             'DEBUG_RF': p_rf,
@@ -376,6 +383,10 @@ if st.sidebar.button(" Estimate Cost with AI"):
              st.session_state['refresh_id'] += 1
              st.rerun()
 
+# --- NEW: WINNER'S CURSE QUOTE ---
+st.sidebar.markdown("---")
+st.sidebar.info("💡 **Did you know?** In bidding auctions, the 'winner' is often the person who most underestimated the costs. Therefore, winning can actually mean losing money. This tool helps prevent the **Winner's Curse** using CVaR analysis.")
+
 # --- MAIN ANALYSIS BUTTON ---
 if st.button(" Analyze Bid"):
     if not scaler_class:
@@ -392,11 +403,14 @@ if st.button(" Analyze Bid"):
             msg = "GO FOR BID" if color == "#27ae60" else " NO-BID"
 
             st.markdown(f"<h2 style='color:{color}'>{msg}</h2>", unsafe_allow_html=True)
-            c1, c2, c3, c4 = st.columns(4)
+            
+            # --- UPDATED METRICS (ADDED 5th COLUMN FOR CVaR) ---
+            c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("Markup", f"{best['Markup_Percent']:.2f}%")
             c2.metric("Bid Price", f"₹{best['Bid_Price']:.2f} Cr")
             c3.metric("Win Prob", f"{win_p*100:.1f}%")
             c4.metric("Exp. Profit", f"₹{best['Expected_Profit']:.2f} Cr")
+            c5.metric("CVaR (Risk)", f"₹{best['CVaR_95']:.2f} Cr", delta_color="inverse") # <--- CVaR Metric
             
             # --- DEBUG PROBABILITIES ---
             with st.expander(" Debug: Why this probability?", expanded=False):
@@ -422,6 +436,10 @@ if st.button(" Analyze Bid"):
                                 df_sim['Lower_Bound'], 
                                 df_sim['Upper_Bound'], 
                                 color='green', alpha=0.15, label='95% Confidence Interval')
+                
+                # --- NEW: CVaR LINE & LEGEND ---
+                cvar_val = best['CVaR_95']
+                ax.axhline(cvar_val, color='#e74c3c', linestyle='-.', linewidth=1.5, label=f'CVaR: ₹{cvar_val:.2f} Cr')
 
                 ax2 = ax.twinx()
                 ax2.plot(df_sim['Markup_Percent'], df_sim['Final_Win_Prob'], color='blue', ls='--', label='Win Prob')
@@ -430,7 +448,9 @@ if st.button(" Analyze Bid"):
                 # Dot
                 optimal_m = best['Markup_Percent']
                 ax.plot(optimal_m, best['Expected_Profit'], 'ro', markersize=8, zorder=10, label='Optimal Bid')
-                ax.annotate(f"Markup: {optimal_m:.1f}%\nProfit: ₹{best['Expected_Profit']:.1f}Cr", 
+                
+                # --- UPDATED ANNOTATION WITH CVaR ---
+                ax.annotate(f"Markup: {optimal_m:.1f}%\nProfit: ₹{best['Expected_Profit']:.1f}Cr\nCVaR: ₹{cvar_val:.1f}Cr", 
                             xy=(optimal_m, best['Expected_Profit']), 
                             xytext=(optimal_m+1, best['Expected_Profit']),
                             arrowprops=dict(facecolor='black', arrowstyle='->'))
@@ -441,7 +461,7 @@ if st.button(" Analyze Bid"):
                 
                 st.pyplot(fig)
                 st.markdown("### 📊 Strategy Data Table")
-                st.dataframe(df_sim[['Markup_Percent', 'Bid_Price', 'Expected_Profit', 'Final_Win_Prob']].style.background_gradient(cmap='Greens', subset=['Expected_Profit']))
+                st.dataframe(df_sim[['Markup_Percent', 'Bid_Price', 'Expected_Profit', 'Final_Win_Prob', 'CVaR_95']].style.background_gradient(cmap='Greens', subset=['Expected_Profit']))
                 
             # --- GRAPH 2: Risk ---
             with t2:
@@ -467,7 +487,7 @@ if st.button(" Analyze Bid"):
                 
                 st.pyplot(fig)
                 st.markdown("### ⚠️ Risk Analysis Data")
-                st.dataframe(df_sim[['Markup_Percent', 'Risk_of_Loss_Prob', 'Expected_Profit']].style.background_gradient(cmap='Reds', subset=['Risk_of_Loss_Prob']))
+                st.dataframe(df_sim[['Markup_Percent', 'Risk_of_Loss_Prob', 'Expected_Profit', 'CVaR_95']].style.background_gradient(cmap='Reds', subset=['Risk_of_Loss_Prob']))
 
             # --- GRAPH 3: SHAP ---
             with t3:
