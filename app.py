@@ -523,31 +523,32 @@ if st.button(" Analyze Bid"):
                 
                 # --- CORRECTED SUMMARY BOX LOGIC ---
                 # 1. Get Actual Result safely
-                actual_res = 0 
+                has_actual_data = False
+                actual_res = None
+                
                 if not st.session_state['project_data'].empty:
-                    # Priority: Check for 'Result', else use last column
-                    if 'Result' in st.session_state['project_data'].columns:
-                        actual_res = st.session_state['project_data']['Result'].iloc[0]
-                    else:
-                        actual_res = st.session_state['project_data'].iloc[0, -1]
+                    # Look for your specific column name
+                    target_cols = ['Win_Status']
+                    found_col = next((c for c in target_cols if c in st.session_state['project_data'].columns), None)
+                    
+                    if found_col:
+                        actual_res = st.session_state['project_data'][found_col].iloc[0]
+                        has_actual_data = True
                 
-                # Robust WIN/LOSS Check (handles 1/0 or Text)
-                is_win = False
-                try:
-                    is_win = int(actual_res) == 1
-                except:
-                    # Clean the string and check for keywords
-                    val_str = str(actual_res).strip().upper()
-                    is_win = val_str in ['WIN', 'WON', 'SUCCESS', 'TRUE', '1']
-                
-                res_txt = "WIN" if is_win else "LOSS"
-                box_clr = "#27ae60" if res_txt == "WIN" else "#c0392b"
-                
-                # 2. Get Actual Win Prob for Manual Markup
                 idx_closest = (df_sim['Markup_Percent'] - manual_markup).abs().idxmin()
-                actual_win_p = df_sim.loc[idx_closest, 'Final_Win_Prob']
-
-                summary_text = f"ACTUAL RESULT: {res_txt}\nActual Markup: {manual_markup:.2f}%\nActual Win Prob: {actual_win_p*100:.1f}%"
+                current_win_p = df_sim.loc[idx_closest, 'Final_Win_Prob']
+                
+                if has_actual_data:
+                    val_clean = str(actual_res).strip().upper()
+                    is_win = val_clean in ['1', '1.0', 'WIN', 'WON', 'SUCCESS', 'TRUE']
+                    
+                    res_txt = "WIN" if is_win else "LOSS"
+                    box_clr = "#27ae60" if is_win else "#c0392b"
+                    summary_text = f"HISTORICAL RESULT: {res_txt}\nMarkup: {manual_markup:.2f}%\nWin Prob: {current_win_p*100:.1f}%"
+                else:
+                    res_txt = "NEW PROJECT"
+                    box_clr = "#34495e"
+                    summary_text = f"STATUS: {res_txt}\nNo Actual Data\nEst. Win Prob: -- %"
                 
                 # 3. Draw Box (Top Right)
                 plt.gca().text(0.98, 0.98, summary_text, transform=plt.gca().transAxes, 
@@ -557,4 +558,5 @@ if st.button(" Analyze Bid"):
                 st.pyplot(fig)
             
             st.download_button("📥 Download Report", df_sim.to_csv().encode('utf-8'), "bid_report.csv")
+
 
