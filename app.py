@@ -6,24 +6,21 @@ import joblib
 import os
 import shap 
 
-# --- ADDED: GLOBAL RANDOM SEED ---
+
 np.random.seed(42)
 
-# Ensure XGBoost class can be unpickled
+
 try:
     import xgboost
 except ImportError:
     pass
 
-# --- PAGE CONFIGURATION ---
+
 st.set_page_config(page_title="Bid Genie", layout="wide", page_icon="🏗️")
 
-# Define possible Region Options globally
 REGION_OPTIONS = [1.0, 1.2, 1.5]
 
-# ==========================================
-# 1. INTELLIGENT MODEL LOADING
-# ==========================================
+
 @st.cache_resource
 def load_models():
     # Load Classifiers
@@ -35,7 +32,7 @@ def load_models():
         st.error(f"⚠️ Classifier Load Error: {e}")
         return None, None, None, None, None, None, None
 
-    # Load Regressors (Optional)
+    # Load Regressors 
     scaler_reg, base_reg, meta_reg = None, None, None
     if os.path.exists('final_scaler_reg.pkl'):
         try:
@@ -45,23 +42,20 @@ def load_models():
         except Exception as e:
             st.warning(f"⚠️ Regressor found but failed to load: {e}")
 
-    # --- THE FIX: Load the FROZEN Background Data ---
     shap_background = None
     if os.path.exists('frozen_shap_background.pkl'):
         try:
             shap_background = joblib.load('frozen_shap_background.pkl')
         except Exception as e:
-            st.warning(f"⚠️ Frozen SHAP background found but failed to load: {e}")
+            st.warning(f" Frozen SHAP background found but failed to load: {e}")
     else:
-        st.error("❌ CRITICAL: 'frozen_shap_background.pkl' is MISSING. Please move it to this folder.")
+        st.error(" CRITICAL: 'frozen_shap_background.pkl' is MISSING. Please move it to this folder.")
 
     return scaler_cls, base_cls, meta_cls, scaler_reg, base_reg, meta_reg, shap_background
 
 scaler_class, base_class, meta_class, scaler_reg, base_reg, meta_reg, frozen_background = load_models()
 
-# ==========================================
-# 2. HELPER FUNCTIONS
-# ==========================================
+
 def smart_fill_missing_features(input_df, scaler):
     expected_cols = scaler.feature_names_in_
     
@@ -75,11 +69,11 @@ def smart_fill_missing_features(input_df, scaler):
             
     return input_df[expected_cols], expected_cols
 
-# --- AI COST PREDICTOR ---
+#  AI COST PREDICTOR ---
 def predict_ai_cost(input_df, scaler, base_models, meta_model):
     if not all([scaler, base_models, meta_model]): return None
     
-    # 1. Prepare Features
+    # 1. Features
     input_filled, cols = smart_fill_missing_features(input_df.copy(), scaler)
     X_scaled = scaler.transform(input_filled)
     
@@ -100,18 +94,17 @@ def predict_ai_cost(input_df, scaler, base_models, meta_model):
         'Ridge': p_ridge
     })
     
-    # 4. Force Column Order (Safety)
     inner_m = getattr(meta_model, 'estimator', getattr(meta_model, 'base_estimator', meta_model))
     if hasattr(inner_m, 'feature_names_in_'):
         meta_features = meta_features[inner_m.feature_names_in_]
         
     return meta_model.predict(meta_features)[0]
 
-# --- UPDATED SHAP EXPLAINER (USES FROZEN BACKGROUND) ---
+#  SHAP EXPLAINER 
 @st.cache_resource
 def get_system_explainer(_base_models, _meta_model, _scaler, _frozen_bg):
     def full_system_predict(X_scaled_array):
-        # Ensure input is DataFrame with correct columns if possible, else use array
+
         p_rf = _base_models['rf'].predict_proba(X_scaled_array)[:, 1]
         p_xgb = _base_models['xgb'].predict_proba(X_scaled_array)[:, 1]
         p_log = _base_models['log_reg'].predict_proba(X_scaled_array)[:, 1]
@@ -120,11 +113,10 @@ def get_system_explainer(_base_models, _meta_model, _scaler, _frozen_bg):
         meta_features = pd.DataFrame({'RF_Prob': p_rf, 'XGB_Prob': p_xgb, 'Log_Prob': p_log, 'SVC_Prob': p_svc})
         
         inner_m = getattr(_meta_model, 'estimator', getattr(_meta_model, 'base_estimator', _meta_model))
-        # Handle interaction term if present
+     
         if hasattr(inner_m, 'feature_names_in_') and 'XGB_SVC_Inter' in inner_m.feature_names_in_:
              meta_features['XGB_SVC_Inter'] = p_xgb * p_svc
         
-        # Ensure correct column order for meta model
         if hasattr(inner_m, 'feature_names_in_'):
             meta_features = meta_features[inner_m.feature_names_in_]
              
@@ -132,12 +124,10 @@ def get_system_explainer(_base_models, _meta_model, _scaler, _frozen_bg):
 
     if _scaler is None: return None
     
-    # --- USE EXACT BACKGROUND FROM NOTEBOOK ---
     if _frozen_bg is not None:
         background = _frozen_bg
     else:
-        # Fallback
-        st.warning("⚠️ Using fallback Zero-Background. Move 'frozen_shap_background.pkl' to app folder to fix graphs.")
+        st.warning(" Using fallback Zero-Background. Move 'frozen_shap_background.pkl' to app folder to fix graphs.")
         n_features = len(_scaler.feature_names_in_)
         background = np.zeros((1, n_features)) 
 
@@ -227,9 +217,9 @@ def optimize_bid_with_stacking(input_df_raw, base_models, meta_model, scaler):
     best_idx = df_results['Expected_Profit'].idxmax()
     return df_results.loc[best_idx], df_results, df_results.at[best_idx, 'Scaled_Features'], df_results.at[best_idx, 'Raw_Display_Features']
 
-# ==========================================
-# 6. USER INTERFACE
-# ==========================================
+
+#  USER INTERFACE
+
 st.title("🏗️ Bid Genie: Construction Bid Optimizer")
 
 default_keys = {
@@ -478,13 +468,12 @@ if st.button(" Analyze Bid"):
                 legend_text = (r"$\bf{E[f(x)]}$: Avg Win Prob (Train)" + "\n" + r"$\bf{f(x)}$: Pred Win Prob" + "\n" + r"$\bf{Threshold}$: 0.390")
                 plt.gca().text(0.02, 0.02, legend_text, transform=plt.gca().transAxes, fontsize=10, ha='left', va='bottom', bbox=dict(facecolor='white', alpha=0.9))
                 
-                # --- UPDATED SUMMARY BOX LOGIC WITH Win_Status ---
                 
                 has_actual_data = False
                 actual_res = None
                 
                 if not st.session_state['project_data'].empty:
-                    # Look for your specific column name
+                    
                     target_cols = ['Win_Status']
                     found_col = next((c for c in target_cols if c in st.session_state['project_data'].columns), None)
                     
@@ -514,3 +503,4 @@ if st.button(" Analyze Bid"):
                 st.pyplot(fig)
             
             st.download_button("📥 Download Report", df_sim.to_csv().encode('utf-8'), "bid_report.csv")
+
