@@ -352,7 +352,7 @@ with st.sidebar.expander("🔧 Technical Details"):
     dlp_days = c2.number_input("DLP Period", 0, 2000, int(get_val_adv('dlp_period_days', 365)))
     
     c3, c4 = st.columns(2)
-    main_turnouts = c3.number_input("Mainline Turnouts", 0, 100, int(get_val_adv('mainline_turnouts', 15)))
+    main_turnouts = c3.number_input("Mainline Turnouts", 0, 100, int(get_val_adv('mainline_turnouts', 0)))
     depot_turnouts = c4.number_input("Depot Turnouts", 0, 100, int(get_val_adv('depot_turnouts', 0)))
     
     c5, c6 = st.columns(2)
@@ -557,3 +557,4 @@ if st.button(" Analyze Bid"):
                 st.pyplot(fig)
             
             st.download_button("📥 Download Report", df_sim.to_csv().encode('utf-8'), "bid_report.csv")
+
