@@ -136,7 +136,7 @@ def get_system_explainer(_base_models, _meta_model, _scaler, _frozen_bg):
     if _frozen_bg is not None:
         background = _frozen_bg
     else:
-        # Fallback (Should not happen if you follow instructions)
+        # Fallback
         st.warning("⚠️ Using fallback Zero-Background. Move 'frozen_shap_background.pkl' to app folder to fix graphs.")
         n_features = len(_scaler.feature_names_in_)
         background = np.zeros((1, n_features)) 
@@ -144,7 +144,6 @@ def get_system_explainer(_base_models, _meta_model, _scaler, _frozen_bg):
     return shap.KernelExplainer(full_system_predict, background)
 
 if scaler_class and base_class and meta_class:
-    # Pass the loaded frozen_background to the explainer
     system_explainer = get_system_explainer(base_class, meta_class, scaler_class, frozen_background)
 
 def optimize_bid_with_stacking(input_df_raw, base_models, meta_model, scaler):
@@ -160,7 +159,6 @@ def optimize_bid_with_stacking(input_df_raw, base_models, meta_model, scaler):
     possible_markups = np.arange(0.01, 0.20, 0.005) 
     results = []
     
-    # --- Seed OUTSIDE loop to match Notebook ---
     np.random.seed(42) 
     
     for markup in possible_markups:
@@ -195,20 +193,16 @@ def optimize_bid_with_stacking(input_df_raw, base_models, meta_model, scaler):
 
         win_prob = meta_model.predict_proba(meta_features)[:, 1][0] 			
         
-        # --- Randomness Logic (Synced with Notebook) ---
         simulated_costs = np.random.normal(loc=cost, scale=cost * 0.05, size=1000)
         simulated_profits_if_won = current_bid - simulated_costs
         risk_prob = np.mean(simulated_profits_if_won < 0)
         
-        # Calculate true 95% bounds
         lower_bound_sim = np.percentile(simulated_profits_if_won, 2.5) * win_prob
         upper_bound_sim = np.percentile(simulated_profits_if_won, 97.5) * win_prob
         
-        # --- CVaR Calculation ---
         var_95 = np.percentile(simulated_profits_if_won, 5)
         cvar_95 = simulated_profits_if_won[simulated_profits_if_won <= var_95].mean()
         
-        # --- NEW: Potential Profit (Gross) ---
         potential_profit = current_bid - cost
 
         results.append({
@@ -216,7 +210,7 @@ def optimize_bid_with_stacking(input_df_raw, base_models, meta_model, scaler):
             'Bid_Price': current_bid,
             'Final_Win_Prob': win_prob, 
             'Expected_Profit': potential_profit * win_prob,
-            'Potential_Profit': potential_profit, # <--- Added Gross Profit
+            'Potential_Profit': potential_profit, 
             'Risk_of_Loss_Prob': risk_prob * 100,
             'Lower_Bound': lower_bound_sim,   
             'Upper_Bound': upper_bound_sim, 
@@ -238,7 +232,6 @@ def optimize_bid_with_stacking(input_df_raw, base_models, meta_model, scaler):
 # ==========================================
 st.title("🏗️ Bid Genie: Construction Bid Optimizer")
 
-# --- Initialize Session State ---
 default_keys = {
     'cost_val': 100.0, 'markup_val': 0.0, 'dur_val': 730, 'comp_val': 5, 
     'tech_val': 85, 'reg_idx': 0, 'refresh_id': 0, 'project_data': pd.DataFrame()
@@ -247,7 +240,6 @@ for key, val in default_keys.items():
     if key not in st.session_state:
         st.session_state[key] = val
 
-# --- CALLBACKS ---
 def process_upload():
     uploaded = st.session_state['file_uploader_widget']
     if uploaded is not None:
@@ -259,7 +251,6 @@ def process_upload():
             df.columns = df.columns.str.strip()
             st.session_state['project_data'] = df
             
-            # Update Simple Variables
             if 'total_cost_estimate_crores' in df.columns: st.session_state['cost_val'] = float(df['total_cost_estimate_crores'].iloc[0])
             elif 'Estimated_Cost' in df.columns: st.session_state['cost_val'] = float(df['Estimated_Cost'].iloc[0])
 
@@ -268,11 +259,8 @@ def process_upload():
 
             if 'No_of_Competitors' in df.columns: st.session_state['comp_val'] = int(df['No_of_Competitors'].iloc[0])
             if 'time_for_completion_days' in df.columns: st.session_state['dur_val'] = int(df['time_for_completion_days'].iloc[0])
-            
-            # --- THE MISSING FIX: Update Tech Score from Excel ---
             if 'Technical_Score' in df.columns: st.session_state['tech_val'] = int(df['Technical_Score'].iloc[0])
 
-            # Fix: Match Float Value to Integer Index for Selectbox
             if 'regional_cost_index' in df.columns:
                 val = float(df['regional_cost_index'].iloc[0])
                 closest_idx = 0
@@ -288,7 +276,6 @@ def process_upload():
         except Exception as e:
             st.error(f"Error parsing file: {e}")
 
-# --- SIDEBAR START ---
 st.sidebar.header("📂 Data Source")
 st.sidebar.file_uploader(
     "Upload Excel/CSV (Model Ready)", 
@@ -306,26 +293,22 @@ st.sidebar.header("📝 Project Parameters")
 
 rid = st.session_state['refresh_id']
 
-# --- MAIN INPUTS ---
 input_cost = st.sidebar.number_input("Estimated Cost (Cr)", 1.0, 10000.0, step=1.0, value=st.session_state['cost_val'], key=f"cost_{rid}")
 manual_markup = st.sidebar.number_input("Actual Markup (%)", 0.0, 100.0, step=0.1, value=st.session_state['markup_val'], key=f"markup_{rid}")
 
-# Correct Selectbox Implementation
 reg_index_selected = st.sidebar.selectbox("Region Cost Index", options=REGION_OPTIONS, index=st.session_state['reg_idx'], key=f"reg_{rid}")
-st.session_state['reg_idx'] = REGION_OPTIONS.index(reg_index_selected) # Store index back
+st.session_state['reg_idx'] = REGION_OPTIONS.index(reg_index_selected)
 
 duration = st.sidebar.number_input("Duration (Days)", 30, 3000, value=st.session_state['dur_val'], key=f"dur_{rid}")
 competitors = st.sidebar.number_input("Competitors", 1, 50, value=st.session_state['comp_val'], key=f"comp_{rid}")
 tech_score = st.sidebar.slider("Tech Score", 0, 100, value=st.session_state['tech_val'], key=f"tech_{rid}")
 
-# Sync State
 st.session_state['cost_val'] = input_cost
 st.session_state['markup_val'] = manual_markup
 st.session_state['comp_val'] = competitors
 st.session_state['dur_val'] = duration
 st.session_state['tech_val'] = tech_score
 
-# --- SYNC DATA FOR ANALYSIS ---
 if not st.session_state['project_data'].empty:
     final_input_df = st.session_state['project_data'].copy()
 else:
@@ -336,7 +319,6 @@ def get_val_adv(col, default):
         return float(final_input_df[col].iloc[0])
     return float(default)
 
-# Update final_input_df with MAIN inputs
 final_input_df['total_cost_estimate_crores'] = input_cost
 final_input_df['My_Markup'] = manual_markup / 100.0
 final_input_df['regional_cost_index'] = reg_index_selected
@@ -344,8 +326,6 @@ final_input_df['time_for_completion_days'] = duration
 final_input_df['No_of_Competitors'] = competitors
 final_input_df['Technical_Score'] = tech_score
 
-# --- TECHNICAL DETAILS (WIDGETS) ---
-# We capture these inputs into variables first
 with st.sidebar.expander("🔧 Technical Details"):
     c1, c2 = st.columns(2)
     check_rail = c1.number_input("Check Rail (MT)", 0.0, 1000.0, get_val_adv('total_check_rail_quantity_mt', 0.0))
@@ -359,7 +339,6 @@ with st.sidebar.expander("🔧 Technical Details"):
     ug_km = c5.number_input("Underground (tkm)", 0.0, 200.0, get_val_adv('underground_tkm', 0.0))
     el_km = c6.number_input("Elevated (tkm)", 0.0, 200.0, get_val_adv('elevated_tkm', 0.0))
 
-    # Update final_input_df with TECHNICAL inputs immediately
     final_input_df['total_check_rail_quantity_mt'] = check_rail
     final_input_df['dlp_period_days'] = dlp_days
     final_input_df['mainline_turnouts'] = main_turnouts
@@ -371,27 +350,21 @@ with st.sidebar.expander("🔧 Technical Details"):
     for c in cols_to_fill:
         final_input_df[c] = get_val_adv(c, 0)
 
-# --- AI COST ESTIMATOR BUTTON (MOVED TO BOTTOM) ---
-# Now it can see ALL inputs (Main + Technical) because they are already in final_input_df
 st.sidebar.markdown("---")
 if st.sidebar.button(" Estimate Cost with AI"):
     if scaler_reg is None:
         st.sidebar.error("Regressor models missing!")
     else:
-        # Predict using the FULLY UPDATED final_input_df
         estimated_ai_cost = predict_ai_cost(final_input_df, scaler_reg, base_reg, meta_reg)
-        
         if estimated_ai_cost:
              st.success(f"AI Estimated Cost: ₹{estimated_ai_cost:.2f} Cr")
              st.session_state['cost_val'] = float(estimated_ai_cost)
              st.session_state['refresh_id'] += 1
              st.rerun()
 
-# --- NEW: WINNER'S CURSE QUOTE ---
 st.sidebar.markdown("---")
-st.sidebar.info("💡 **Did you know?** In bidding auctions, the 'winner' is often the person who most underestimated the costs. Therefore, winning can actually mean losing money. This tool helps prevent the **Winner's Curse**.")
+st.sidebar.info("💡 **Did you know?** In bidding auctions, the 'winner' is often the person who most underestimated the costs. This tool helps prevent the **Winner's Curse**.")
 
-# --- MAIN ANALYSIS BUTTON ---
 if st.button(" Analyze Bid"):
     if not scaler_class:
         st.error("Models not loaded.")
@@ -408,15 +381,13 @@ if st.button(" Analyze Bid"):
 
             st.markdown(f"<h2 style='color:{color}'>{msg}</h2>", unsafe_allow_html=True)
             
-            # --- UPDATED METRICS (ADDED 5th COLUMN FOR CVaR) ---
             c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("Markup", f"{best['Markup_Percent']:.2f}%")
             c2.metric("Bid Price", f"₹{best['Bid_Price']:.2f} Cr")
             c3.metric("Win Prob", f"{win_p*100:.1f}%")
             c4.metric("Exp. Profit", f"₹{best['Expected_Profit']:.2f} Cr")
-            c5.metric("CVaR (Risk)", f"₹{best['CVaR_95']:.2f} Cr", delta_color="inverse") # <--- CVaR Metric
+            c5.metric("CVaR (Risk)", f"₹{best['CVaR_95']:.2f} Cr", delta_color="inverse")
             
-            # --- DEBUG PROBABILITIES ---
             with st.expander(" Debug: Why this probability?", expanded=False):
                 st.write("**Base Model Probabilities:**")
                 cols = st.columns(4)
@@ -424,30 +395,21 @@ if st.button(" Analyze Bid"):
                 cols[1].metric("XGB", f"{best['DEBUG_XGB']:.4f}")
                 cols[2].metric("SVC", f"{best['DEBUG_SVC']:.4f}")
                 cols[3].metric("LogReg", f"{best['DEBUG_LOG']:.4f}")
-                st.caption("Matches Notebook?")
 
             t1, t2, t3 = st.tabs(["Markup - Win Prob.", "Risk Analysis", "SHAP"])
             
-            # --- GRAPH 1: Strategy ---
             with t1:
                 fig, ax = plt.subplots(figsize=(10, 4))
-                
-                # 1. Expected Profit
                 ax.plot(df_sim['Markup_Percent'], df_sim['Expected_Profit'], color='green', lw=3, label='Exp. Profit')
-                
-                # 2. NEW: Potential Profit (Gross)
                 ax.plot(df_sim['Markup_Percent'], df_sim['Potential_Profit'], color='grey', ls='--', lw=1.5, label='Potential Profit (Gross)')
-                
                 ax.set_ylabel("Profit (Cr)", color='green')
                 ax.axvline(manual_markup, color='black', ls=':', label='Actual Markup')
 
-                # --- CORRECTED: True 95% Confidence Interval ---
                 ax.fill_between(df_sim['Markup_Percent'], 
                                 df_sim['Lower_Bound'], 
                                 df_sim['Upper_Bound'], 
                                 color='green', alpha=0.15, label='95% Confidence Interval')
                 
-                # --- NEW: CVaR LINE & LEGEND ---
                 cvar_val = best['CVaR_95']
                 ax.axhline(cvar_val, color='#e74c3c', linestyle='-.', linewidth=1.5, label=f'CVaR: ₹{cvar_val:.2f} Cr')
 
@@ -455,11 +417,9 @@ if st.button(" Analyze Bid"):
                 ax2.plot(df_sim['Markup_Percent'], df_sim['Final_Win_Prob'], color='blue', ls='--', label='Win Prob')
                 ax2.set_ylabel("Win Probability", color='blue')
                 
-                # Dot
                 optimal_m = best['Markup_Percent']
                 ax.plot(optimal_m, best['Expected_Profit'], 'ro', markersize=8, zorder=10, label='Optimal Bid')
                 
-                # --- UPDATED ANNOTATION WITH CVaR ---
                 ax.annotate(f"Markup: {optimal_m:.1f}%\nProfit: ₹{best['Expected_Profit']:.1f}Cr\nCVaR: ₹{cvar_val:.1f}Cr", 
                             xy=(optimal_m, best['Expected_Profit']), 
                             xytext=(optimal_m+1, best['Expected_Profit']),
@@ -473,7 +433,6 @@ if st.button(" Analyze Bid"):
                 st.markdown("### 📊 Strategy Data Table")
                 st.dataframe(df_sim[['Markup_Percent', 'Bid_Price', 'Expected_Profit', 'Final_Win_Prob', 'CVaR_95']].style.background_gradient(cmap='Greens', subset=['Expected_Profit']))
                 
-            # --- GRAPH 2: Risk ---
             with t2:
                 fig, ax = plt.subplots(figsize=(10, 4))
                 ax.plot(df_sim['Markup_Percent'], df_sim['Expected_Profit'], color='green', label='Exp. Profit')
@@ -483,7 +442,6 @@ if st.button(" Analyze Bid"):
                 ax2.plot(df_sim['Markup_Percent'], df_sim['Risk_of_Loss_Prob'], color='red', label='Risk of Loss')
                 ax2.set_ylabel("Risk %", color='red')
                 
-                # Dot
                 risk_at_optimal = best['Risk_of_Loss_Prob']
                 ax2.plot(optimal_m, risk_at_optimal, 'ro', markersize=8, zorder=10, label='Optimal Risk')
                 ax2.annotate(f"Risk: {risk_at_optimal:.1f}%", 
@@ -499,7 +457,6 @@ if st.button(" Analyze Bid"):
                 st.markdown("### ⚠️ Risk Analysis Data")
                 st.dataframe(df_sim[['Markup_Percent', 'Risk_of_Loss_Prob', 'Expected_Profit', 'CVaR_95']].style.background_gradient(cmap='Reds', subset=['Risk_of_Loss_Prob']))
 
-            # --- GRAPH 3: SHAP ---
             with t3:
                 shap_vals = system_explainer.shap_values(best_scaled, nsamples=50)
                 if isinstance(shap_vals, list): sv = shap_vals[1][0]
@@ -521,40 +478,39 @@ if st.button(" Analyze Bid"):
                 legend_text = (r"$\bf{E[f(x)]}$: Avg Win Prob (Train)" + "\n" + r"$\bf{f(x)}$: Pred Win Prob" + "\n" + r"$\bf{Threshold}$: 0.390")
                 plt.gca().text(0.02, 0.02, legend_text, transform=plt.gca().transAxes, fontsize=10, ha='left', va='bottom', bbox=dict(facecolor='white', alpha=0.9))
                 
-                # --- CORRECTED SUMMARY BOX LOGIC ---
-                # 1. Get Actual Result safely
-                actual_res = 0 
+                # --- UPDATED SUMMARY BOX LOGIC WITH Win_Status ---
+                
+                has_actual_data = False
+                actual_res = None
+                
                 if not st.session_state['project_data'].empty:
-                    # Priority: Check for 'Result', else use last column
-                    if 'Result' in st.session_state['project_data'].columns:
-                        actual_res = st.session_state['project_data']['Result'].iloc[0]
-                    else:
-                        actual_res = st.session_state['project_data'].iloc[0, -1]
+                    # Look for your specific column name
+                    target_cols = ['Win_Status']
+                    found_col = next((c for c in target_cols if c in st.session_state['project_data'].columns), None)
+                    
+                    if found_col:
+                        actual_res = st.session_state['project_data'][found_col].iloc[0]
+                        has_actual_data = True
                 
-                # Robust WIN/LOSS Check (handles 1/0 or Text)
-                is_win = False
-                try:
-                    is_win = int(actual_res) == 1
-                except:
-                    # Clean the string and check for keywords
-                    val_str = str(actual_res).strip().upper()
-                    is_win = val_str in ['WIN', 'WON', 'SUCCESS', 'TRUE', '1']
-                
-                res_txt = "WIN" if is_win else "LOSS"
-                box_clr = "#27ae60" if res_txt == "WIN" else "#c0392b"
-                
-                # 2. Get Actual Win Prob for Manual Markup
                 idx_closest = (df_sim['Markup_Percent'] - manual_markup).abs().idxmin()
-                actual_win_p = df_sim.loc[idx_closest, 'Final_Win_Prob']
-
-                summary_text = f"ACTUAL RESULT: {res_txt}\nActual Markup: {manual_markup:.2f}%\nActual Win Prob: {actual_win_p*100:.1f}%"
+                current_win_p = df_sim.loc[idx_closest, 'Final_Win_Prob']
                 
-                # 3. Draw Box (Top Right)
+                if has_actual_data:
+                    val_clean = str(actual_res).strip().upper()
+                    is_win = val_clean in ['1', '1.0', 'WIN', 'WON', 'SUCCESS', 'TRUE']
+                    
+                    res_txt = "WIN" if is_win else "LOSS"
+                    box_clr = "#27ae60" if is_win else "#c0392b"
+                    summary_text = f"HISTORICAL RESULT: {res_txt}\nMarkup: {manual_markup:.2f}%\nWin Prob: {current_win_p*100:.1f}%"
+                else:
+                    res_txt = "NEW PROJECT"
+                    box_clr = "#34495e"
+                    summary_text = f"STATUS: {res_txt}\nNo Actual Data\nEst. Win Prob: -- %"
+                
                 plt.gca().text(0.98, 0.98, summary_text, transform=plt.gca().transAxes, 
                                fontsize=10, fontweight='bold', ha='right', va='top', 
-                               color='white', bbox=dict(facecolor=box_clr, alpha=0.9, pad=0.5, edgecolor='white'))
+                               color='white', bbox=dict(facecolor=box_clr, alpha=0.9, pad=5, edgecolor='white'))
                 
                 st.pyplot(fig)
             
             st.download_button("📥 Download Report", df_sim.to_csv().encode('utf-8'), "bid_report.csv")
-
