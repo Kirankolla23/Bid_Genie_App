@@ -15,11 +15,13 @@ try:
 except ImportError:
     pass
 
-
+#  PAGE CONFIGURATION 
 st.set_page_config(page_title="Bid Genie", layout="wide", page_icon="🏗️")
 
 REGION_OPTIONS = [1.0, 1.2, 1.5]
 
+
+# MODEL LOADING
 
 @st.cache_resource
 def load_models():
@@ -32,7 +34,7 @@ def load_models():
         st.error(f"⚠️ Classifier Load Error: {e}")
         return None, None, None, None, None, None, None
 
-    # Load Regressors 
+    # Load Regressors
     scaler_reg, base_reg, meta_reg = None, None, None
     if os.path.exists('final_scaler_reg.pkl'):
         try:
@@ -42,14 +44,15 @@ def load_models():
         except Exception as e:
             st.warning(f"⚠️ Regressor found but failed to load: {e}")
 
+    # Load FROZEN Background Data
     shap_background = None
     if os.path.exists('frozen_shap_background.pkl'):
         try:
             shap_background = joblib.load('frozen_shap_background.pkl')
         except Exception as e:
-            st.warning(f" Frozen SHAP background found but failed to load: {e}")
+            st.warning(f"⚠️ Frozen SHAP background found but failed to load: {e}")
     else:
-        st.error(" CRITICAL: 'frozen_shap_background.pkl' is MISSING. Please move it to this folder.")
+        st.error("❌ CRITICAL: 'frozen_shap_background.pkl' is MISSING. Please move it to this folder.")
 
     return scaler_cls, base_cls, meta_cls, scaler_reg, base_reg, meta_reg, shap_background
 
@@ -69,15 +72,15 @@ def smart_fill_missing_features(input_df, scaler):
             
     return input_df[expected_cols], expected_cols
 
-#  AI COST PREDICTOR ---
+# AI COST PREDICTOR 
 def predict_ai_cost(input_df, scaler, base_models, meta_model):
     if not all([scaler, base_models, meta_model]): return None
     
-    # 1. Features
+    
     input_filled, cols = smart_fill_missing_features(input_df.copy(), scaler)
     X_scaled = scaler.transform(input_filled)
     
-    # 2. Base Model Predictions
+    
     try:
         p_rf = base_models['rf'].predict(X_scaled)
         p_xgb = base_models['xgb'].predict(X_scaled)
@@ -86,7 +89,7 @@ def predict_ai_cost(input_df, scaler, base_models, meta_model):
     except Exception as e:
         return None
 
-    # 3. Stack Features
+    
     meta_features = pd.DataFrame({
         'RF': p_rf, 
         'XGB': p_xgb, 
@@ -94,17 +97,18 @@ def predict_ai_cost(input_df, scaler, base_models, meta_model):
         'Ridge': p_ridge
     })
     
+    
     inner_m = getattr(meta_model, 'estimator', getattr(meta_model, 'base_estimator', meta_model))
     if hasattr(inner_m, 'feature_names_in_'):
         meta_features = meta_features[inner_m.feature_names_in_]
         
     return meta_model.predict(meta_features)[0]
 
-#  SHAP EXPLAINER 
+
 @st.cache_resource
 def get_system_explainer(_base_models, _meta_model, _scaler, _frozen_bg):
     def full_system_predict(X_scaled_array):
-
+        
         p_rf = _base_models['rf'].predict_proba(X_scaled_array)[:, 1]
         p_xgb = _base_models['xgb'].predict_proba(X_scaled_array)[:, 1]
         p_log = _base_models['log_reg'].predict_proba(X_scaled_array)[:, 1]
@@ -113,9 +117,10 @@ def get_system_explainer(_base_models, _meta_model, _scaler, _frozen_bg):
         meta_features = pd.DataFrame({'RF_Prob': p_rf, 'XGB_Prob': p_xgb, 'Log_Prob': p_log, 'SVC_Prob': p_svc})
         
         inner_m = getattr(_meta_model, 'estimator', getattr(_meta_model, 'base_estimator', _meta_model))
-     
+        
         if hasattr(inner_m, 'feature_names_in_') and 'XGB_SVC_Inter' in inner_m.feature_names_in_:
              meta_features['XGB_SVC_Inter'] = p_xgb * p_svc
+        
         
         if hasattr(inner_m, 'feature_names_in_'):
             meta_features = meta_features[inner_m.feature_names_in_]
@@ -124,10 +129,12 @@ def get_system_explainer(_base_models, _meta_model, _scaler, _frozen_bg):
 
     if _scaler is None: return None
     
+    
     if _frozen_bg is not None:
         background = _frozen_bg
     else:
-        st.warning(" Using fallback Zero-Background. Move 'frozen_shap_background.pkl' to app folder to fix graphs.")
+        
+        st.warning("⚠️ Using fallback Zero-Background. Move 'frozen_shap_background.pkl' to app folder to fix graphs.")
         n_features = len(_scaler.feature_names_in_)
         background = np.zeros((1, n_features)) 
 
@@ -218,7 +225,7 @@ def optimize_bid_with_stacking(input_df_raw, base_models, meta_model, scaler):
     return df_results.loc[best_idx], df_results, df_results.at[best_idx, 'Scaled_Features'], df_results.at[best_idx, 'Raw_Display_Features']
 
 
-#  USER INTERFACE
+# USER INTERFACE
 
 st.title("🏗️ Bid Genie: Construction Bid Optimizer")
 
@@ -318,7 +325,7 @@ final_input_df['Technical_Score'] = tech_score
 
 with st.sidebar.expander("🔧 Technical Details"):
     c1, c2 = st.columns(2)
-    check_rail = c1.number_input("Check Rail (MT)", 0.0, 1000.0, get_val_adv('total_check_rail_quantity_mt', 0.0))
+    ballasted_track = c1.number_input("Length of Ballasted Track (tkm)", 0.0, 1000.0, get_val_adv('length of ballasted track (tkm)', 0.0))
     dlp_days = c2.number_input("DLP Period", 0, 2000, int(get_val_adv('dlp_period_days', 365)))
     
     c3, c4 = st.columns(2)
@@ -329,7 +336,7 @@ with st.sidebar.expander("🔧 Technical Details"):
     ug_km = c5.number_input("Underground (tkm)", 0.0, 200.0, get_val_adv('underground_tkm', 0.0))
     el_km = c6.number_input("Elevated (tkm)", 0.0, 200.0, get_val_adv('elevated_tkm', 0.0))
 
-    final_input_df['total_check_rail_quantity_mt'] = check_rail
+    final_input_df['length of ballasted track (tkm)'] = ballasted_track
     final_input_df['dlp_period_days'] = dlp_days
     final_input_df['mainline_turnouts'] = main_turnouts
     final_input_df['depot_turnouts'] = depot_turnouts
@@ -469,32 +476,40 @@ if st.button(" Analyze Bid"):
                 plt.gca().text(0.02, 0.02, legend_text, transform=plt.gca().transAxes, fontsize=10, ha='left', va='bottom', bbox=dict(facecolor='white', alpha=0.9))
                 
                 
-                has_actual_data = False
-                actual_res = None
+                is_historical = False
+                actual_res = 0
                 
                 if not st.session_state['project_data'].empty:
-                    
-                    target_cols = ['Win_Status']
-                    found_col = next((c for c in target_cols if c in st.session_state['project_data'].columns), None)
-                    
-                    if found_col:
-                        actual_res = st.session_state['project_data'][found_col].iloc[0]
-                        has_actual_data = True
+                    cols = st.session_state['project_data'].columns
+                    # It is only a historical project if it explicitly has 'Result', 'Actual_Markup', or 'Win_Status'
+                    if 'Result' in cols or 'Actual_Markup' in cols or 'Win_Status' in cols:
+                        is_historical = True
+                        if 'Result' in cols:
+                            actual_res = st.session_state['project_data']['Result'].iloc[0]
+                        elif 'Win_Status' in cols:
+                            actual_res = st.session_state['project_data']['Win_Status'].iloc[0]
+                        else:
+                            actual_res = st.session_state['project_data'].iloc[0, -1]
                 
-                idx_closest = (df_sim['Markup_Percent'] - manual_markup).abs().idxmin()
-                current_win_p = df_sim.loc[idx_closest, 'Final_Win_Prob']
-                
-                if has_actual_data:
-                    val_clean = str(actual_res).strip().upper()
-                    is_win = val_clean in ['1', '1.0', 'WIN', 'WON', 'SUCCESS', 'TRUE']
+                if is_historical:
+                    
+                    is_win = False
+                    try:
+                        is_win = int(actual_res) == 1
+                    except:
+                        val_str = str(actual_res).strip().upper()
+                        is_win = val_str in ['WIN', 'WON', 'SUCCESS', 'TRUE', '1']
                     
                     res_txt = "WIN" if is_win else "LOSS"
-                    box_clr = "#27ae60" if is_win else "#c0392b"
-                    summary_text = f"HISTORICAL RESULT: {res_txt}\nMarkup: {manual_markup:.2f}%\nWin Prob: {current_win_p*100:.1f}%"
+                    box_clr = "#27ae60" if res_txt == "WIN" else "#c0392b"
+                    
+                    idx_closest = (df_sim['Markup_Percent'] - manual_markup).abs().idxmin()
+                    actual_win_p = df_sim.loc[idx_closest, 'Final_Win_Prob']
+
+                    summary_text = f"ACTUAL RESULT: {res_txt}\nActual Markup: {manual_markup:.2f}%\nActual Win Prob: {actual_win_p*100:.1f}%"
                 else:
-                    res_txt = "NEW PROJECT"
                     box_clr = "#34495e"
-                    summary_text = f"STATUS: {res_txt}\nNo Actual Data\nEst. Win Prob: -- %"
+                    summary_text = "ACTUAL RESULT: No Historical Result\nActual Markup: -- %\nActual Win Prob: -- %"
                 
                 plt.gca().text(0.98, 0.98, summary_text, transform=plt.gca().transAxes, 
                                fontsize=10, fontweight='bold', ha='right', va='top', 
@@ -503,4 +518,3 @@ if st.button(" Analyze Bid"):
                 st.pyplot(fig)
             
             st.download_button("📥 Download Report", df_sim.to_csv().encode('utf-8'), "bid_report.csv")
-
